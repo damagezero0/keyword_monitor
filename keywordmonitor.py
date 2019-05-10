@@ -2,28 +2,77 @@
 #coding: utf-8
 
 import os
+import sys
 import requests
 import smtplib
 import time
+import traceback
+import ConfigParser
 from datetime import datetime
 from email.mime.text import MIMEText
 
-max_sleep_time       = 60
-alert_email_from  = "ACCOUNTS"
-alert_email_password = "PASSWORD" 
-alert_email_to  = "ACCOUNTS"
-logfile="./log/keywordmonitor.log"
 
-
-def logging(message):
+def logging(message, is_keyword):
+    
+    # standard output
     print("[INFO] {0}".format(message))
-    with  open(logfile, 'a') as f:
-        f.write("[{0}] [INFO] {1}\n".format(get_time(), message))
+
+    if is_keyword:
+        with  open(logfile_keyword, 'a') as f:
+            f.write("[{0}] [INFO] {1}\n".format(get_time(), message))
+    else:
+        with  open(logfile_monitor, 'a') as f:
+            f.write("[{0}] [INFO] {1}\n".format(get_time(), message))
 
 
 def get_time():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+
+def config_load():
+
+    configfile = "./etc/config.ini"
+    
+    if not os.path.exists(configfile):
+        print("[ERROR]{0} dose not exist".format(configfile))
+        sys.exit(1)
+
+    with open(configfile, 'r') as f:
+
+        ini = ConfigParser.ConfigParser()
+        ini.read('./etc/config.ini')
+
+        global max_sleep_time
+        max_sleep_time = float(ini.get('DEFAULT','max_sleep_time'))
+
+        global alert_email_from
+        alert_email_from = ini.get('DEFAULT','alert_email_from')
+
+        global alert_email_password
+        alert_email_password = ini.get('DEFAULT','alert_email_password')
+
+        global alert_email_to
+        alert_email_to = ini.get('DEFAULT','alert_email_to')
+
+        global logfile_monitor
+        logfile_monitor = os.path.join(ini.get('DEFAULT','logpath'), ini.get('DEFAULT','logfilename_monitor'))
+
+        global logfile_keyword 
+        logfile_keyword = os.path.join(ini.get('DEFAULT','logpath'), ini.get('DEFAULT','logfilename_keyword'))
+
+        # read in our list of keywords
+        global keywords
+        with open("./etc/keywords.txt","r") as fd:
+            file_contents = fd.read()
+            keywords      = file_contents.splitlines()
+            
+        # load up our list of stored paste ID's and only check the new ones
+        global pastebin_ids 
+        if os.path.exists("./etc/pastebin_ids.txt"):
+            with open("./etc/pastebin_ids.txt","rb") as fd:
+                pastebin_ids = fd.read().splitlines()
+        else:
+            pastebin_ids = []
 
 # Send email to you!
 def send_alert(alert_email):
@@ -53,36 +102,9 @@ def send_alert(alert_email):
     server.sendmail(alert_email_account,alert_email_account,msg.as_string())
     server.quit()
     
-    logging("Alert email sent!")
+    logging("Alert email sent!", False)
 
     return
-
-
-# Check if the URL is new.
-def check_urls(keyword,urls):
-    
-    new_urls = []
-    
-    if os.path.exists("keywords/%s.txt" % keyword):
-        
-        with open("keywords/%s.txt" % keyword,"r") as fd:
-            stored_urls = fd.read().splitlines()
-        
-        for url in urls:
-            if url not in stored_urls:
-                
-                logging("New URL for {0} discovered: {1}".format(keyword,url))
-                new_urls.append(url)
-                
-    else:
-        new_urls = urls
-        
-    # now store the new urls back in the file
-    with open("keywords/%s.txt" % keyword,"ab") as fd:
-        for url in new_urls:
-            fd.write("%s\r\n" % url)
-            
-    return new_urls
 
 
 # Check Pastebin for keyword list.
@@ -93,10 +115,10 @@ def check_pastebin(keywords):
     
     # poll the Pastebin API
     try:
-        response = requests.get("https://scrape.pastebin.com/api_scraping.php?limit=100")
+        response = requests.get("https://scrape.pastebin.com/api_scraping.php?limit=200")
         
         if ("DOES NOT HAVE ACCESS")  in (str)(response.content) :
-            logging(response.content)
+            logging(response.content, False)
             exit (-1)
 
     except:
@@ -104,13 +126,6 @@ def check_pastebin(keywords):
     
     # parse the JSON
     result   = response.json()
-    
-    # load up our list of stored paste ID's and only check the new ones
-    if os.path.exists("pastebin_ids.txt"):
-        with open("pastebin_ids.txt","rb") as fd:
-            pastebin_ids = fd.read().splitlines()
-    else:
-        pastebin_ids = []
         
     for paste in result:
     
@@ -133,14 +148,14 @@ def check_pastebin(keywords):
             if len(keyword_hits):      
                 paste_hits[paste['key']] = (keyword_hits,paste_response.content)
             
-                logging("Hit on Pastebin for {0}: {1}".format(str(keyword_hits), paste['full_url']))
+                logging("Hit on Pastebin for {0}: {1}".format(str(keyword_hits), paste['full_url']), False)
 
     # store the newly checked IDs 
-    with open("pastebin_ids.txt","ab") as fd:
+    with open("./etc/pastebin_ids.txt","ab") as fd:
         for pastebin_id in new_ids:
             fd.write("%s\r\n" % pastebin_id)
     
-    logging("Successfully processed {0} Pastebin posts.".format(len(new_ids)))
+    logging("Successfully processed {0} Pastebin posts.".format(len(new_ids)), False)
 
     return paste_hits
 
@@ -165,8 +180,7 @@ def check_keywords(keywords):
     if total_time < max_sleep_time:
         sleep_time = max_sleep_time - total_time
         
-        logging("Sleeping for {0} s".format(int(sleep_time)))
-        
+        logging("Sleeping for {0} s".format(int(sleep_time)), False)
         time.sleep(sleep_time)
     
     return alert_email
@@ -174,13 +188,12 @@ def check_keywords(keywords):
 
 if __name__ == "__main__":
 
-    if not os.path.exists("keywords"):
-        os.mkdir("keywords")
+    try:
+        config_load()
 
-    # read in our list of keywords
-    with open("./keywords/keywords.txt","r") as fd:
-        file_contents = fd.read()
-        keywords      = file_contents.splitlines()
+    except Exception:
+        print(traceback.format_exc())
+        sys.exit(1)
 
     # execute your search once first to populate results
     check_keywords(keywords)
@@ -192,5 +205,5 @@ if __name__ == "__main__":
         
         if len(alert_email.keys()):
             #if we have alerts send them out
-            logging(alert_email)
+            logging(alert_email, True)
             #send_alert(alert_email)
