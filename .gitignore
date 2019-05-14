@@ -1,2 +1,6 @@
 etc/pastebin_ids.txt
+<<<<<<< HEAD
 log/*.log
+=======
+test.py
+>>>>>>> develop

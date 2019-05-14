@@ -6,6 +6,7 @@ import sys
 import requests
 import smtplib
 import time
+import json
 import traceback
 import ConfigParser
 from datetime import datetime
@@ -16,10 +17,11 @@ def logging(message, is_keyword):
     
     # standard output
     print("[INFO] {0}".format(message))
+    result = json.dumps(message)
 
     if is_keyword:
         with  open(logfile_keyword, 'a') as f:
-            f.write("[{0}] [INFO] {1}\n".format(get_time(), message))
+            f.write("[{0}] [INFO] {1}\n".format(get_time(), result))
     else:
         with  open(logfile_monitor, 'a') as f:
             f.write("[{0}] [INFO] {1}\n".format(get_time(), message))
@@ -115,7 +117,7 @@ def check_pastebin(keywords):
     
     # poll the Pastebin API
     try:
-        response = requests.get("https://scrape.pastebin.com/api_scraping.php?limit=200")
+        response = requests.get("https://scrape.pastebin.com/api_scraping.php?limit=250")
         
         if ("DOES NOT HAVE ACCESS")  in (str)(response.content) :
             logging(response.content, False)
@@ -137,18 +139,22 @@ def check_pastebin(keywords):
             # it and then check it for our keywords 
             paste_response       = requests.get(paste['scrape_url'])
             paste_body_lower     = paste_response.content.lower()
+            paste_body_strings = str(paste_response.content).lstrip()
             
-            keyword_hits = []
+            keyword_hits = {}
             
             for keyword in keywords:
                 
                 if keyword.lower() in paste_body_lower:
-                    keyword_hits.append(keyword)
+                    #keyword_hits.update(keyword)
+                    #keyword_hits.append(keyword)
+                    keyword_hits[paste['key']] = keyword
                 
             if len(keyword_hits):      
-                paste_hits[paste['key']] = (keyword_hits,paste_response.content)
+                paste_hits.update({"pastebin_id":"{0}".format(paste['key']), "keyword":"{0}".format(keyword),\
+                        "row_data":"{0}".format(paste_body_strings)})
             
-                logging("Hit on Pastebin for {0}: {1}".format(str(keyword_hits), paste['full_url']), False)
+                logging("Hit on Pastebin(https://pastebin.com/) for {0}".format(keyword_hits), False)
 
     # store the newly checked IDs 
     with open("./etc/pastebin_ids.txt","ab") as fd:
